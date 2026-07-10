@@ -24,27 +24,37 @@ jobs:
         run: |
           cd orb-slam3-ros-mono
           
-          # 1. Remove deprecated Bionic Ubuntu mirror paths causing 404s
-          sed -i '/RUN sh -c "echo '\''deb http:\/\/old-releases.ubuntu.com/d' Dockerfile
-          sed -i '/deb http:\/\/old-releases.ubuntu.com/d' Dockerfile
-          
-          # 2. Fix the pip index mirror string back to standard PyPI
-          sed -i 's|pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple pyyaml==6.0|pip3 install pyyaml==6.0|g' Dockerfile
-          
-          # 3. Optimize compilation threads for the cloud environment (8GB RAM available)
+          # 1. Optimize compilation threads for the cloud environment (8GB RAM available)
           sed -i 's/make -j4/make -j2/g' ORB_SLAM3/build.sh
           sed -i 's/make -j2/make -j2/g' ORB_SLAM3/build.sh
           sed -i 's/make/make -j2/g' ORB_SLAM3/build_ros.sh
           sed -i 's/make -j2/make -j2/g' Dockerfile
 
-          # === NEW FIXES FOR APTERROR 100 ===
-          # 4. Use a broader regex to catch and strip the broken '\tgit' string cleanly
-          sed -i 's/[\\:|]*tgit/git/g' Dockerfile || sed -i 's/\\tgit/git/g' Dockerfile
-          sed -i 's/\\t&&/&&/g' Dockerfile
+          # 2. Use inline Python to completely purge the broken mirror, \tgit, and python2 strings
+          python3 -c "
+          with open('Dockerfile', 'r') as f:
+              content = f.read()
 
-          # 5. Switch deprecated python-dev and python-numpy to python3 counterparts
-          sed -i 's/python-dev/python3-dev/g' Dockerfile
-          sed -i 's/python-numpy/python3-numpy/g' Dockerfile
+          # Remove deprecated Bionic mirrors causing 404s
+          import re
+          content = re.sub(r'RUN sh -c \"echo .?deb http:\/\/old-releases\.ubuntu\.com.*?> /etc/apt/sources.list\"', '', content, flags=re.DOTALL)
+          content = re.sub(r'deb http:\/\/old-releases\.ubuntu\.com[^\n]*', '', content)
+
+          # Fix the pip index mirror string back to standard PyPI
+          content = content.replace('pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple pyyaml==6.0', 'pip3 install pyyaml==6.0')
+
+          # Fix typos and replace python2 packages with python3 equivalents
+          content = content.replace('\\tgit', 'git')
+          content = content.replace('python-dev', 'python3-dev')
+          content = content.replace('python-numpy', 'python3-numpy')
+          content = content.replace('\\t&&', '&&')
+
+          with open('Dockerfile', 'w') as f:
+              f.write(content)
+          "
+          
+          # Quick sanity check to make sure the changes applied in the logs
+          cat Dockerfile | grep -A 4 "apt-get install" || true
           
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
