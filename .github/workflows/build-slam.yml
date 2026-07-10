@@ -1,0 +1,61 @@
+name: Build Native ARM64 SLAM Hive Image
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Allows you to trigger this manually
+
+jobs:
+  build-and-push:
+    # Use GitHub's native ARM64 runner to bypass QEMU completely
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Clone SLAM Hive Core Algorithm
+        run: |
+          git clone https://github.com/SLAM-Hive/orb-slam3-ros-mono.git
+          cd orb-slam3-ros-mono
+
+      - name: Patch Dockerfile and Build Scripts
+        run: |
+          cd orb-slam3-ros-mono
+          
+          # 1. Remove deprecated Bionic Ubuntu mirror paths causing 404s
+          sed -i '/RUN sh -c "echo '\''deb http:\/\/old-releases.ubuntu.com/d' Dockerfile
+          sed -i '/deb http:\/\/old-releases.ubuntu.com/d' Dockerfile
+          
+          # 2. Fix the pip index mirror string back to standard PyPI
+          sed -i 's|pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple pyyaml==6.0|pip3 install pyyaml==6.0|g' Dockerfile
+          
+          # 3. Optimize compilation threads for the cloud environment (8GB RAM available)
+          # We can use -j2 safely in the cloud runner to finish faster without crashing memory limits
+          sed -i 's/make -j4/make -j2/g' ORB_SLAM3/build.sh
+          sed -i 's/make -j2/make -j2/g' ORB_SLAM3/build.sh
+          sed -i 's/make/make -j2/g' ORB_SLAM3/build_ros.sh
+          sed -i 's/make -j2/make -j2/g' Dockerfile
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets::DOCKERHUB_USERNAME }}
+          password: ${{ secrets::DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./orb-slam3-ros-mono
+          file: ./orb-slam3-ros-mono/Dockerfile
+          push: true
+          # Tags it with your username and standard versioning scheme
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/slam-algo:orb3-pi5
+            ${{ secrets.DOCKERHUB_USERNAME }}/slam-algo:latest
+          # caching to speed up subsequent GitHub workflow runs
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
