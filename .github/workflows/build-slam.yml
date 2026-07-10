@@ -38,8 +38,9 @@ jobs:
           sed -i 's/make -j2/make -j2/g' Dockerfile
 
           # === NEW FIXES FOR APTERROR 100 ===
-          # 4. Fix the literal '\tgit' syntax error to 'git'
-          sed -i 's/\\tgit/git/g' Dockerfile
+          # 4. Use a broader regex to catch and strip the broken '\tgit' string cleanly
+          sed -i 's/[\\:|]*tgit/git/g' Dockerfile || sed -i 's/\\tgit/git/g' Dockerfile
+          sed -i 's/\\t&&/&&/g' Dockerfile
 
           # 5. Switch deprecated python-dev and python-numpy to python3 counterparts
           sed -i 's/python-dev/python3-dev/g' Dockerfile
